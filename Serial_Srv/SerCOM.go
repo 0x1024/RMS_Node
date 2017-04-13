@@ -41,10 +41,12 @@ func SerialPortDaemon() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			for {
+			//for {
+			go EchoWaiter(port)
 				echo(port)
-				EchoWaiter(port)
-			}
+			//}
+			SendCMD(port ,[]byte{0xa1,02},[]byte{00,01})
+			//EchoWaiter(port)
 		}
 
 		fmt.Println("\nserv end ")
@@ -82,7 +84,7 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 	var res []byte
 	var cnt int = 0
 
-Out:
+//Out:
 	for true {
 		for {
 			// Reads up to 100 bytes
@@ -107,9 +109,11 @@ Out:
 			if len(res) > 7 {
 				err := DeFrame(res)
 				if err == nil {
-					break Out
+					//break Out
 				} else if err.Error() =="1" {
 
+				}else if err.Error() =="2" {
+					res=res[int(9+res[4]):]
 				}else {
 					fmt.Println(err)
 					panic(err)
@@ -130,7 +134,42 @@ func DeFrame(res []byte) error {
 	}else if res[0] == 0xAA && res[1] == 0x55 && len(res) < int(9+res[4]){
 		fmt.Println("\nshort pack",ctr, res)
 		return errors.New("1")
+	}else if  res[0] == 0xAA && res[1] == 0x55 && len(res) > int(9+res[4]) {
+		fmt.Println("\nshort pack", ctr, res[:int(9+res[4])])
+		return errors.New("2")
 	}
 	fmt.Println("\nwrong pack", res)
 	return errors.New("wrong Frame~!")
 }
+
+
+func SendCMD(port serial.Port,cmd []byte,dat []byte) {
+
+	send := make([]byte, 32)
+	send[0] = 0xaa
+	send[1] = 0x55
+	send[2] = 0x01
+	//len 3h 4l
+	send[3] = 0x00
+	send[4] = byte(len(dat))
+	//cmd
+	send[5] = cmd[0]
+	send[6] = cmd[1]
+	var i int=0
+	var k byte
+	for i,k =range dat {
+		send[7+i] = k
+	}
+	ret := util.CRC16(send, 7+i)
+	send[i+8] = byte((ret >> 8) & 0xff)
+	send[i+9] = byte(ret & 0xff)
+
+	n, err := port.Write(send[:9+i])
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Handshake echo, %d bytes:%x \n", n, send[:9+i])
+
+}
+
