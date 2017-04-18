@@ -4,14 +4,16 @@ import (
 	"RMS_Node/Common"
 	"RMS_Node/Serial_Srv"
 	"RMS_Node/Xmodem"
-	"math/rand"
-	"time"
 	"fmt"
+	"math/rand"
+	"runtime"
+	"time"
 )
 
 var RMSNode_EXIT chan int
 
 func main() {
+	runtime.GOMAXPROCS(2)
 	Common.Init()
 
 	//util.HRBserive(true)
@@ -23,8 +25,8 @@ func main() {
 		dd[i] = byte(rand.Int31n(255))
 	}
 	if len(dd) <= 1024 {
-	fmt.Println(dd)
-	}else {
+		fmt.Println(dd)
+	} else {
 		fmt.Println(dd[:1024])
 	}
 	go Xmodem.XmodemTransmit(dd)
