@@ -26,7 +26,6 @@ var ctr uint
 
 var port *serial.Port
 
-
 func SerialPortDaemon() {
 	var c serial.Config
 	c.Baud = 115200
@@ -36,7 +35,7 @@ func SerialPortDaemon() {
 	c.StopBits = serial.Stop1
 	port, _ = serial.OpenPort(&c)
 
-	ComTrans_Ch = make(chan []byte ,1)
+	ComTrans_Ch = make(chan []byte, 1)
 
 	go EchoWaiter(*port)
 	//echo(*port)
@@ -161,16 +160,45 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 
 			} else if len(res) > 7 {
 				err := DeFrame(res)
-				if err == nil {
-//					fmt.Printf("\n [%s]rec \n",time.Now().UnixNano())
-					ComTrans_Ch <- res[: int(9+res[4]) ]
-					res = res[ int(9+res[4]): ]
+				if err.Error() == "0" {
+
+					switch res[5] {
+					case MAIN_RMS:
+						ctr++
+						fmt.Println("\ngot pack", ctr, res)
+						fmt.Printf("\ngot pack %d, %s \n", ctr, res[:int(9+res[4])])
+						ComTrans_Ch <- res[:int(9+res[4])]
+						res = res[int(9+res[4]):]
+					case MAIN_STRING:
+
+					default:
+					}
+
 					//break Out
 				} else if err.Error() == "1" {
-
+					//fmt.Println("\nshort pack", ctr, res)
+					//fmt.Printf("\nshort pack %d, %s", ctr, res)
 				} else if err.Error() == "2" {
+					switch res[5] {
+					case MAIN_RMS:
+						ctr++
+						fmt.Println("\ngot pack", ctr, res)
+						fmt.Printf("\ngot pack %d, %s \n", ctr, res[:int(9+res[4])])
+						ComTrans_Ch <- res[:int(9+res[4])]
+					case MAIN_STRING:
+						fmt.Printf("\ngot msg %s \n",  res[:int(9+res[4])])
+
+					default:
+
+					}
 					res = res[int(9+res[4]):]
+
+				} else if err.Error() == "3" {
+
+				}else if err.Error() == "4" {
+					res=res[:0]
 				} else {
+					res=res[:0]
 					fmt.Println(err)
 					panic(err)
 				}
@@ -184,31 +212,22 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 
 func DeFrame(res []byte) error {
 	if res[0] == 0xAA && res[1] == 0x55 && len(res) == int(9+res[4]) {
-		ctr++
-		switch res[5] {
-		case MAIN_RMS :
-
-		
-		}
-		fmt.Println("\ngot pack", ctr, res)
-		fmt.Printf("\ngot pack %d, %s \n\n", ctr, res[:int(9+res[4])])
-		return nil
+		return errors.New("0")
 	} else if res[0] == 0xAA && res[1] == 0x55 && len(res) < int(9+res[4]) {
-		fmt.Println("\nshort pack", ctr, res)
-		fmt.Printf("\nshort pack %d, %s", ctr, res)
 		return errors.New("1")
 	} else if res[0] == 0xAA && res[1] == 0x55 && len(res) > int(9+res[4]) {
-		fmt.Println("\nshort pack", ctr, res[:int(9+res[4])])
-		fmt.Printf("\nshort pack %d, %s", ctr, res[:int(9+res[4])])
+		//fmt.Printf("\nmore pack L:%d,C:%d % X %s", len(res), int(9+res[4]), res,res[:int(9+res[4])])
 
 		return errors.New("2")
 	}
+
 	fmt.Printf("\nwrong pack %s", res)
 	fmt.Printf("\nwrong pack % X\n\n", res)
 	return errors.New("wrong Frame~!")
 }
 
-func echo(port serial.Port) {
+//send a echo ,return with send err
+func echo(port serial.Port) bool {
 
 	send := make([]byte, 32)
 	send[0] = 0xaa
@@ -223,12 +242,12 @@ func echo(port serial.Port) {
 	send[8] = byte(ret & 0xff)
 
 	n, err := port.Write(send[:9])
-	if err != nil {
-		log.Fatal(err)
+	if err != nil || n != 9 {
+		log.Info(err)
+		return false
 	}
-
-	fmt.Printf("Handshake echo, % d bytes:% X \n", n, send[:9])
-
+	return true
+	//fmt.Printf("Handshake echo, % d bytes:% X \n", n, send[:9])
 }
 
 func SendCMD(port serial.Port, cmd []byte, dat []byte) {
@@ -240,16 +259,18 @@ func SendCMD(port serial.Port, cmd []byte, dat []byte) {
 	send[1] = 0x55
 	send[2] = 0x01
 	//len 3h 4l
-	send[3] =byte(dl/256)
+	send[3] = byte(dl / 256)
 	send[4] = byte(dl)
 	//cmd
 	send[5] = cmd[0]
 	send[6] = cmd[1]
-	var i int = 0
-	var k byte
-	for i, k = range dat {
-		send[7+i] = k
-	}
+
+	//var i int = 0
+	//var k byte
+	//for i, k = range dat {
+	//	send[7+i] = k
+	//}
+	copy(send[7:], dat)
 	ret := util.CRC16(send, 7+dl)
 	send[7+dl] = byte((ret >> 8) & 0xff)
 	send[8+dl] = byte(ret & 0xff)
@@ -260,94 +281,104 @@ func SendCMD(port serial.Port, cmd []byte, dat []byte) {
 	}
 
 	//fmt.Printf("\n\n [%s] send cmd, % d bytes:% X \n",time.Now().UnixNano(), n, send[:9+dl])
-	fmt.Printf("\n\n [%s] send cmd, % d  \n",time.Now().UnixNano(), n)
+	fmt.Printf("\n\n [%s] send cmd, % d  \n", time.Now().UnixNano(), n)
 
 }
 
 func SendByte(c []byte) {
-	n, err := port.Write(c )
+	n, err := port.Write(c)
 	if err != nil {
 		log.Fatal(n, err)
 	}
 
 }
+
 //2017 0418 new add rms segment
 
-const(
-     MAIN_RMS   = 0xC0
-
+const (
+	MAIN_RMS        = 0xC0
+	MAIN_STRING     = 0xFE
 )
 
-const(
-	SUB_RMS_FILEHEAD        = 0x10
-	SUB_RMS_FILEDATA        = 0x11
-
+const (
+	SUB_RMS_FILEHEAD = 0x10
+	SUB_RMS_FILEDATA = 0x11
+	SUB_RMS_FILE_END = 0x12
+)
+const (
+	SUB_STRING_S = 0x10
+	SUB_STRING_E = 0x11
 )
 
 
-func sendfile(){
-	var dat []byte=make([]byte,300)
-	var offsert int64=0
+func sendfile() {
+	var dat []byte = make([]byte, 300)
+	var offsert int64 = 0
 
 
 	//open file
-	input := "e:\\License.txt"
+	input := "e:/iRobot1_HGD.bin"
 	fi, err := os.Open(string(input))
 	if err != nil {
 		panic(err)
 	}
 	defer fi.Close()
 	fiinfo, err := fi.Stat()
-	s:=fiinfo.Size()
-	fmt.Println("the size of file is ", fiinfo.Size(), "bytes") //fiinfo.Size() return int64 type
+	s := fiinfo.Size()
+	fmt.Printf("\n %s the size of file is %d ",fiinfo.Name(), fiinfo.Size()) //fiinfo.Size() return int64 type
+
 
 	//send file head ,max file len 4GB(0xFFFFFFFF)
-	dat[0]= byte(s>>24)
-	dat[1]= byte(s>>16)
-	dat[2]= byte(s>>8)
-	dat[3]= byte(s>>0)
-	dat[4]= 0
-	dat[5]= 0
-	ss := copy(dat[6:],fiinfo.Name())
+	dat[0] = byte(s >> 24)
+	dat[1] = byte(s >> 16)
+	dat[2] = byte(s >> 8)
+	dat[3] = byte(s >> 0)
+	dat[4] = 0
+	dat[5] = 0
+	ss := copy(dat[6:], fiinfo.Name())
 
-	SendCMD(*port, []byte{MAIN_RMS,SUB_RMS_FILEHEAD},dat[:6+ss])
-	c:= <- ComTrans_Ch
+	SendCMD(*port, []byte{MAIN_RMS, SUB_RMS_FILEHEAD}, dat[:6+ss])
+	c := <-ComTrans_Ch
 	if c[6] != SUB_RMS_FILEHEAD {
-		fmt.Println("send hf err",c)
+		fmt.Println("send hf err", c)
 	}
 
-	timecost :=time.Now()
-	fmt.Printf("\n [%s]file str \n",timecost.Format(time.RFC3339Nano))
+	timecost := time.Now()
+
+	fmt.Printf("\n [%s]file str \n", timecost.Format(time.RFC3339Nano))
 
 	//file body
 	for {
 		// 0~3 block no
-		dat[0]= byte(offsert>>24)
-		dat[1]= byte(offsert>>16)
-		dat[2]= byte(offsert>>8)
-		dat[3]= byte(offsert>>0)
+		dat[0] = byte(offsert >> 24)
+		dat[1] = byte(offsert >> 16)
+		dat[2] = byte(offsert >> 8)
+		dat[3] = byte(offsert >> 0)
 
-		//3~256+3 data block
-//		fmt.Printf("\n [%s]readfile \n",time.Now().UnixNano())
-		ss,err=	fi.ReadAt(dat[4:256+4], offsert*256  )
-		if ss == 0 {
-			fmt.Printf("\n [%s]file end [%s] \n",time.Now().Format(time.RFC3339Nano) ,time.Now().Sub(timecost))
+		//4~256+4 data block
+		ss, err = fi.ReadAt(dat[4:256+4], offsert*256)
+		if ss == 0 { // end of file
+			SendCMD(*port, []byte{MAIN_RMS, SUB_RMS_FILE_END}, dat[:0])
+			fmt.Printf("\n [%s]file end [%s] \n", time.Now().Format(time.RFC3339Nano), time.Now().Sub(timecost))
 
-			break}
-
-//		fmt.Printf("\n [%s]ch-bfe \n",time.Now().UnixNano())
-
-		SendCMD(*port, []byte{MAIN_RMS,SUB_RMS_FILEDATA},dat[:4+ss])
-		c= <- ComTrans_Ch
-//		fmt.Printf("\n [%s]ch-rec \n",time.Now().UnixNano())
-		if c[6] != SUB_RMS_FILEDATA || c[7+3]!=dat[3]{
-
-			fmt.Println("send hf err",c)
+			break
 		}
+
+		SendCMD(*port, []byte{MAIN_RMS, SUB_RMS_FILEDATA}, dat[:4+ss])
+		c = <-ComTrans_Ch
+		if c[6] != SUB_RMS_FILEDATA || c[7+3] != dat[3] {
+			fmt.Println("send hf err", c)
+		}
+
 		offsert++
 	}
 
+	c = <-ComTrans_Ch
+	if c[6] != SUB_RMS_FILE_END || c[7+3] != dat[3] {
+		fmt.Println("send hf complete", c)
+	}
+	//inform server task completed
+
+
 
 }
-
-
