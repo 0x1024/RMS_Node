@@ -7,9 +7,12 @@ import (
 	"github.com/juju/errors"
 	log "github.com/sirupsen/logrus"
 	//"go.bug.st/serial.v1"
+	"RMS_Srv/Public"
 	"github.com/tarm/serial"
 	"os"
 	"time"
+
+	"RMS_Srv/Protocol"
 )
 
 var ComPortDown_ch chan int
@@ -24,27 +27,91 @@ var ctr uint
 //	StopBits: serial.OneStopBit,
 //}
 
+//Call定义
+type Call struct {
+	Id      int
+	To      *time.Timer
+	Request interface{}
+	Reply   interface{}
+	Done    chan *Call //用于结果返回时,消息通知,使用者必须依靠这个来获取真正的结果。
+}
+
+func (call *Call) TO() {
+	fmt.Println("ooops")
+	call.Reply = 1
+	call.done()
+}
+
+func (call *Call) Del() {
+	call.Reply = 1
+	call.To.Stop()
+	delete(affair, call.Id)
+}
+
+// 非常重要的异步调用结果返回，供框架内部使用。
+func (call *Call) done() {
+	select {
+	case call.Done <- call:
+	// ok
+	default:
+		// 阻塞情况处理,这里忽略
+	}
+}
+
+//用于检查是否存在事务请求
+var affair = make(map[int]*Call)
+
 var port *serial.Port
 
 func SerialPortDaemon() {
 	var c serial.Config
+
+	portlist, err := GetPortsList()
+	fmt.Println(portlist, err)
+
 	c.Baud = 115200
-	c.Name = "COM5"
 	c.Size = 8
 	c.Parity = serial.ParityNone
 	c.StopBits = serial.Stop1
-	port, _ = serial.OpenPort(&c)
+
+	//port, _ = serial.OpenPort(&c)
 
 	ComTrans_Ch = make(chan []byte, 1)
+	for _, portx := range portlist {
+		c.Name = portx
+		port, err = serial.OpenPort(&c)
+		if err != nil {
+			log.Panic("open port ", err)
+		}
 
-	go EchoWaiter(*port)
-	//echo(*port)
+		affair[1] = new(Call)
+		affair[1].Id = 1
+		affair[1].Done = make(chan *Call, 1)
+		affair[1].Request = MAIN_PROC
+		affair[1].To = time.AfterFunc(5e9, affair[1].TO)
 
-	//SendCMD(*port, []byte{0xF0, 0x60}, []byte{}) //trig file trans task
-	//Common.SpecialComStat = true
-	//Common.SpecialComTast = Common.File_Trans
+		fmt.Println(portx)
+		go EchoWaiter(*port)
+		echo(*port)
 
-	sendfile()
+		c := <-affair[1].Done
+		fmt.Println("reply", c.Reply)
+		if c.Reply == nil {
+			var cc Public.TcpTrucker
+			cc.Cmd = Protocol.Fc_HB
+			cc.Dat = 0x30
+			Public.TcpSender_Ch <- cc
+			c.Del()
+			break
+		}else {
+			c.Del()
+		}
+		//time.Sleep(5e9)
+		//port.Close()
+	}
+
+
+	//go EchoWaiter(*port)
 
 }
 
@@ -171,6 +238,15 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 						res = res[int(9+res[4]):]
 					case MAIN_STRING:
 
+					case MAIN_PROC:
+						fmt.Printf("\nproc %s \n", res[:int(9+res[4])])
+
+						//affair
+						for _, v := range affair {
+							if v.Request == MAIN_PROC {
+								v.done()
+							}
+						}
 					default:
 					}
 
@@ -186,7 +262,7 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 						fmt.Printf("\ngot pack %d, %s \n", ctr, res[:int(9+res[4])])
 						ComTrans_Ch <- res[:int(9+res[4])]
 					case MAIN_STRING:
-						fmt.Printf("\ngot msg %s \n",  res[:int(9+res[4])])
+						fmt.Printf("\ngot msg %s \n", res[:int(9+res[4])])
 
 					default:
 
@@ -195,10 +271,10 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 
 				} else if err.Error() == "3" {
 
-				}else if err.Error() == "4" {
-					res=res[:0]
+				} else if err.Error() == "4" {
+					res = res[:0]
 				} else {
-					res=res[:0]
+					res = res[:0]
 					fmt.Println(err)
 					panic(err)
 				}
@@ -265,11 +341,6 @@ func SendCMD(port serial.Port, cmd []byte, dat []byte) {
 	send[5] = cmd[0]
 	send[6] = cmd[1]
 
-	//var i int = 0
-	//var k byte
-	//for i, k = range dat {
-	//	send[7+i] = k
-	//}
 	copy(send[7:], dat)
 	ret := util.CRC16(send, 7+dl)
 	send[7+dl] = byte((ret >> 8) & 0xff)
@@ -294,27 +365,34 @@ func SendByte(c []byte) {
 }
 
 //2017 0418 new add rms segment
-
 const (
-	MAIN_RMS        = 0xC0
-	MAIN_STRING     = 0xFE
+	MAIN_RMS    = 0xC0
+	MAIN_STRING = 0xFE
+	MAIN_PROC   = 0xF0
 )
 
+//MAIN_RMS
 const (
 	SUB_RMS_FILEHEAD = 0x10
 	SUB_RMS_FILEDATA = 0x11
 	SUB_RMS_FILE_END = 0x12
 )
+
+//MAIN_STRING
 const (
 	SUB_STRING_S = 0x10
 	SUB_STRING_E = 0x11
 )
 
+//MAIN_PROC
+const (
+	SUB_PROC_VER  = 0x80
+	SUB_PROC_VER1 = 0x11
+)
 
 func sendfile() {
 	var dat []byte = make([]byte, 300)
 	var offsert int64 = 0
-
 
 	//open file
 	input := "e:/iRobot1_HGD.bin"
@@ -325,8 +403,7 @@ func sendfile() {
 	defer fi.Close()
 	fiinfo, err := fi.Stat()
 	s := fiinfo.Size()
-	fmt.Printf("\n %s the size of file is %d ",fiinfo.Name(), fiinfo.Size()) //fiinfo.Size() return int64 type
-
+	fmt.Printf("\n %s the size of file is %d ", fiinfo.Name(), fiinfo.Size()) //fiinfo.Size() return int64 type
 
 	//send file head ,max file len 4GB(0xFFFFFFFF)
 	dat[0] = byte(s >> 24)
@@ -378,7 +455,5 @@ func sendfile() {
 		fmt.Println("send hf complete", c)
 	}
 	//inform server task completed
-
-
 
 }
