@@ -3,16 +3,14 @@ package Serial_Srv
 import (
 	"RMS_Node/Common"
 	"RMS_Node/util"
+	"RMS_Srv/Protocol"
+	"RMS_Srv/Public"
 	"fmt"
 	"github.com/juju/errors"
 	log "github.com/sirupsen/logrus"
-	//"go.bug.st/serial.v1"
-	"RMS_Srv/Public"
 	"github.com/tarm/serial"
 	"os"
 	"time"
-
-	"RMS_Srv/Protocol"
 )
 
 var ComPortDown_ch chan int
@@ -43,7 +41,6 @@ func (call *Call) TO() {
 }
 
 func (call *Call) Del() {
-	call.Reply = 1
 	call.To.Stop()
 	delete(affair, call.Id)
 }
@@ -52,7 +49,9 @@ func (call *Call) Del() {
 func (call *Call) done() {
 	select {
 	case call.Done <- call:
-	// ok
+		if call.Reply == nil {
+			call.Reply = 2 // ok
+		}
 	default:
 		// 阻塞情况处理,这里忽略
 	}
@@ -67,6 +66,9 @@ func SerialPortDaemon() {
 	var c serial.Config
 
 	portlist, err := GetPortsList()
+	if err != nil{
+		log.Panic("no port founded ", err)
+	}
 	fmt.Println(portlist, err)
 
 	c.Baud = 115200
@@ -83,36 +85,55 @@ func SerialPortDaemon() {
 		if err != nil {
 			log.Panic("open port ", err)
 		}
+		defer port.Close()
 
 		affair[1] = new(Call)
 		affair[1].Id = 1
 		affair[1].Done = make(chan *Call, 1)
-		affair[1].Request = MAIN_PROC
+		affair[1].Request = SUB_PROC_VER
 		affair[1].To = time.AfterFunc(5e9, affair[1].TO)
 
 		fmt.Println(portx)
 		go EchoWaiter(*port)
 		echo(*port)
+		//read uid
 
 		c := <-affair[1].Done
 		fmt.Println("reply", c.Reply)
-		if c.Reply == nil {
+		if c.Reply != nil {
 			var cc Public.TcpTrucker
 			cc.Cmd = Protocol.Fc_HB
-			cc.Dat = 0x30
+			cc.Dat = c.Reply
 			Public.TcpSender_Ch <- cc
 			c.Del()
 			break
-		}else {
+		} else {
 			c.Del()
 		}
-		//time.Sleep(5e9)
-		//port.Close()
+
+
 	}
 
+	affair[1] = new(Call)
+	affair[1].Id = 1
+	affair[1].Done = make(chan *Call, 1)
+	affair[1].Request = SUB_PROC_VER
+	affair[1].To = time.AfterFunc(5e9, affair[1].TO)
+	SendCMD(*port, []byte{0xF0, 0x83}, []byte{0x00, 0x50, 0x00, 0x06})
+	rec := <-affair[1].Done
+	if rec.Reply != nil {
+		fmt.Println("reply", rec.Reply)
+		var cc Public.TcpTrucker
+		cc.Cmd = Protocol.Fc_HB
+		cc.Dat = []byte(c.Name)
+		Public.TcpSender_Ch <- cc
+		rec.Del()
+
+	}
 
 	//go EchoWaiter(*port)
-
+	Deamon_Standby := make(chan bool)
+	<- Deamon_Standby
 }
 
 //var port serial.Port
@@ -226,7 +247,7 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 				}
 
 			} else if len(res) > 7 {
-				err := DeFrame(res)
+				err := CheckFrame(res)
 				if err.Error() == "0" {
 
 					switch res[5] {
@@ -243,9 +264,18 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 
 						//affair
 						for _, v := range affair {
-							if v.Request == MAIN_PROC {
+
+							switch v.Request {
+							case SUB_PROC_VER:
+								v.Reply = res[7:int(7+res[4])]
 								v.done()
+							case SUB_PROC_UID:
+								v.Reply = res[7:int(7+res[4])]
+								v.done()
+							default:
+
 							}
+
 						}
 					default:
 					}
@@ -286,7 +316,7 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 	}
 }
 
-func DeFrame(res []byte) error {
+func CheckFrame(res []byte) error {
 	if res[0] == 0xAA && res[1] == 0x55 && len(res) == int(9+res[4]) {
 		return errors.New("0")
 	} else if res[0] == 0xAA && res[1] == 0x55 && len(res) < int(9+res[4]) {
@@ -386,8 +416,8 @@ const (
 
 //MAIN_PROC
 const (
-	SUB_PROC_VER  = 0x80
-	SUB_PROC_VER1 = 0x11
+	SUB_PROC_VER = 0x80
+	SUB_PROC_UID = 0x83
 )
 
 func sendfile() {

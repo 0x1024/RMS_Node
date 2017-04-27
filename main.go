@@ -16,7 +16,7 @@ func main() {
 	Common.Init()
 
 	//util.HRBserive(true)
-	//	go ExtPortSrv.ExternService()
+	go ExtPortSrv.NodeStarter()
 
 	go Serial_Srv.SerialPortDaemon()
 
