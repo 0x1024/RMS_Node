@@ -20,7 +20,7 @@ func main() {
 
 	go Serial_Srv.SerialPortDaemon()
 
-	go ExtPortSrv.NodeStarter()
+
 
 
 	for {

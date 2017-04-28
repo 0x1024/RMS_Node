@@ -36,7 +36,7 @@ type Call struct {
 
 func (call *Call) TO() {
 	fmt.Println("ooops")
-	call.Reply = 1
+	call.Reply = []byte("com time out")
 	call.done()
 }
 
@@ -50,7 +50,7 @@ func (call *Call) done() {
 	select {
 	case call.Done <- call:
 		if call.Reply == nil {
-			call.Reply = 2 // ok
+			call.Reply = []byte("done")
 		}
 	default:
 		// 阻塞情况处理,这里忽略
@@ -136,62 +136,7 @@ func SerialPortDaemon() {
 	<- Deamon_Standby
 }
 
-//var port serial.Port
-//func SerialPortDaemon() {
-//
-//	for port == nil {
-//		//enum ports
-//		ports, err := serial.GetPortsList()
-//		if err != nil {
-//			log.Fatal(err)
-//		}
-//		if len(ports) == 0 {
-//			log.Fatal("No serial ports found!")
-//		}
-//		// Print the list of detected ports
-//		for _, port := range ports {
-//			fmt.Printf("Found port: %v\n", port)
-//		}
-//
-//		for _, portx := range ports {
-//
-//			port, err = serial.Open(portx, mode)
-//			if err != nil {
-//				log.Fatal(err)
-//			}
-//			go EchoWaiter(port)
-//			echo(port)
-//			//}
-//			time.Sleep(1e9)
-//
-//			////write id name info
-//			//var mix =make([]byte,32)
-//			//mix[0]= 0
-//			//mix[1]=0
-//			//for i,k := range[]byte("YB0001"){
-//			//	mix[2+i]=k
-//			//}
-//			//
-//			//SendCMD(port ,[]byte{0xa1,01},mix)
-//
-//			time.Sleep(1e9)
-//			//SendCMD(port ,[]byte{0xa1,02},[]byte{00,00}) //read eeprom data,addr 0
-//			SendCMD(port, []byte{0xF0, 0x60}, []byte{}) //trig file trans task
-//			Common.SpecialComStat = true
-//			Common.SpecialComTast = Common.File_Trans
-//			//go Xmodem.XmodemTransmit()
-//			//EchoWaiter(port)
-//
-//		}
-//
-//		fmt.Println("\nserv end ")
-//		for {
-//			time.Sleep(10e9)
-//		}
-//		<-ComPortDown_ch
-//	}
-//
-//}
+
 
 func EchoWaiter(port serial.Port) { // Read and print the response
 
