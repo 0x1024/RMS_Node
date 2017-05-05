@@ -104,6 +104,7 @@ func SerialPortDaemon() {
 			var cc Public.TcpTrucker
 			cc.Cmd = Protocol.Fc_HB
 			cc.Dat = c.Reply
+			cc.Ip = Public.LocalNode.NodeIPP
 			Public.TcpSender_Ch <- cc
 			c.Del()
 			break
@@ -124,8 +125,12 @@ func SerialPortDaemon() {
 	if rec.Reply != nil {
 		fmt.Println("reply", rec.Reply)
 		var cc Public.TcpTrucker
-		cc.Cmd = Protocol.Fc_HB
-		cc.Dat = []byte(c.Name)
+		cc.Cmd = Protocol.Fc_HC
+		cc.Dat = rec.Reply.([]byte)
+		cc.Ip = Public.LocalNode.NodeIPP
+
+		copy(Public.LocalNode.McuId ,rec.Reply.([]byte) )
+
 		Public.TcpSender_Ch <- cc
 		rec.Del()
 
@@ -365,12 +370,12 @@ const (
 	SUB_PROC_UID = 0x83
 )
 
-func sendfile() {
+func Sendfile(input string) {
 	var dat []byte = make([]byte, 300)
 	var offsert int64 = 0
 
 	//open file
-	input := "e:/iRobot1_HGD.bin"
+	//input := "e:/iRobot1_HGD.bin"
 	fi, err := os.Open(string(input))
 	if err != nil {
 		panic(err)
