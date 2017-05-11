@@ -6,11 +6,12 @@ import (
 	"RMS_Srv/Protocol"
 	"RMS_Srv/Public"
 	"fmt"
+	"os"
+	"time"
+
 	"github.com/juju/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tarm/serial"
-	"os"
-	"time"
 )
 
 var ComPortDown_ch chan int
@@ -66,7 +67,7 @@ func SerialPortDaemon() {
 	var c serial.Config
 
 	portlist, err := GetPortsList()
-	if err != nil{
+	if err != nil {
 		log.Panic("no port founded ", err)
 	}
 	fmt.Println(portlist, err)
@@ -83,7 +84,7 @@ func SerialPortDaemon() {
 		c.Name = portx
 		port, err = serial.OpenPort(&c)
 		if err != nil {
-			log.Panic("open port ", err)
+			log.Panic("open port ", portx, err)
 		}
 		defer port.Close()
 
@@ -95,9 +96,11 @@ func SerialPortDaemon() {
 
 		fmt.Println(portx)
 		go EchoWaiter(*port)
-		echo(*port)
-		//read uid
 
+		//handshake
+		echo(*port)
+
+		//read uid
 		c := <-affair[1].Done
 		fmt.Println("reply", c.Reply)
 		if c.Reply != nil {
@@ -105,13 +108,13 @@ func SerialPortDaemon() {
 			cc.Cmd = Protocol.Fc_HB
 			cc.Dat = c.Reply
 			cc.Ip = Public.LocalNode.NodeIPP
-			Public.TcpSender_Ch <- cc
+			fmt.Print("MCU handshake successed!\n")
 			c.Del()
 			break
 		} else {
+			fmt.Print("MCU no respond,check com wire,or check mcu power!\n")
 			c.Del()
 		}
-
 
 	}
 
@@ -129,7 +132,7 @@ func SerialPortDaemon() {
 		cc.Dat = rec.Reply.([]byte)
 		cc.Ip = Public.LocalNode.NodeIPP
 
-		copy(Public.LocalNode.McuId ,rec.Reply.([]byte) )
+		copy(Public.LocalNode.McuId, rec.Reply.([]byte))
 
 		Public.TcpSender_Ch <- cc
 		rec.Del()
@@ -138,10 +141,8 @@ func SerialPortDaemon() {
 
 	//go EchoWaiter(*port)
 	Deamon_Standby := make(chan bool)
-	<- Deamon_Standby
+	<-Deamon_Standby
 }
-
-
 
 func EchoWaiter(port serial.Port) { // Read and print the response
 
@@ -155,9 +156,10 @@ func EchoWaiter(port serial.Port) { // Read and print the response
 		for {
 			// Reads up to 100 bytes
 			n, err := port.Read(buff)
-
 			if err != nil {
-				log.Fatal(err)
+
+				log.Debug(err)
+				return
 				break
 			}
 			if n == 0 {
